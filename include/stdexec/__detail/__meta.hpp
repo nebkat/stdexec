@@ -90,8 +90,15 @@ namespace STDEXEC
   template <class _Tp, class _Up>
   using __msecond = _Up;
 
+  // Complete (but empty) rather than incomplete: __undefined<_Sigs> operands
+  // appear in ADL contexts (the completion-signature partitioning operator*
+  // fold), where a foreign hidden-friend operator candidate — e.g. mp-units'
+  // quantity operator* — may constrain on derived_from<__undefined<...>, ...>,
+  // which is a hard error for an incomplete type but evaluates to false for a
+  // complete one. The template arguments are still never instantiated.
   template <class...>
-  struct __undefined;
+  struct __undefined
+  {};
 
   template <std::size_t... _Is>
   struct __iota;
