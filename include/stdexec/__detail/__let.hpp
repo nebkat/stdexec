@@ -508,6 +508,46 @@ namespace STDEXEC
     //   }
     // };
 
+    template <class _Query>
+    inline constexpr bool __is_completion_behavior_query_v = false;
+    template <class _Tag>
+    inline constexpr bool __is_completion_behavior_query_v<__get_completion_behavior_t<_Tag>> =
+      true;
+
+    // The attributes of the predecessor sender. Its completion behavior holds
+    // only when it never completes with _SetTag, so that the secondary sender is
+    // never started.
+    template <class _SetTag, class _Sender>
+    struct __pred_attrs
+    {
+      template <class _Tag, class... _Env>
+      [[nodiscard]]
+      constexpr auto query(__get_completion_behavior_t<_Tag>, _Env const &...) const noexcept
+      {
+        if constexpr (__never_sends<_SetTag, _Sender, __fwd_env_t<_Env>...>)
+        {
+          return STDEXEC::__get_completion_behavior<_Tag, _Sender, __fwd_env_t<_Env>...>();
+        }
+        else
+        {
+          return __completion_behavior::__unknown;
+        }
+      }
+
+      template <class _Env2 = env_of_t<_Sender>, __forwarding_query _Query, class... _Args>
+        requires(!__is_completion_behavior_query_v<_Query>)
+             && __queryable_with<_Env2, _Query, _Args...>
+      [[nodiscard]]
+      constexpr auto query(_Query, _Args&&... __args) const
+        noexcept(__nothrow_queryable_with<_Env2, _Query, _Args...>)
+          -> __query_result_t<_Env2, _Query, _Args...>
+      {
+        return STDEXEC::get_env(__sndr_).query(_Query(), static_cast<_Args&&>(__args)...);
+      }
+
+      _Sender const & __sndr_;
+    };
+
     //! Implementation of the `let_*_t` types, where `_SetTag` is, e.g.,
     //! `set_value_t` for `let_value`.
     template <class _LetTag>
@@ -618,7 +658,7 @@ namespace STDEXEC
         []<class _Child>(__ignore, __ignore, _Child const & __child) noexcept -> decltype(auto)
       {
         // TODO(ericniebler): this needs a proper implementation
-        return __fwd_env(STDEXEC::get_env(__child));
+        return __pred_attrs<__t<_LetTag>, _Child>{__child};
       };
 
       template <class _CvSender, class... _Env>

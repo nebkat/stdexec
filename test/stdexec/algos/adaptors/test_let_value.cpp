@@ -320,6 +320,16 @@ namespace
     REQUIRE(called);
   }
 
+  TEST_CASE("let_value does not report the completion behavior of its predecessor",
+            "[adaptors][let_value]")
+  {
+    exec::static_thread_pool pool{1};
+    auto snd = ex::let_value(ex::just(),
+                             [sch = pool.get_scheduler()] { return ex::schedule(sch); });
+    STATIC_REQUIRE(!ex::__completes_inline<ex::set_value_t, ex::env_of_t<decltype(snd)>>);
+    (void) snd;
+  }
+
   TEST_CASE("let_value has the values_type corresponding to the given values",
             "[adaptors][let_value]")
   {

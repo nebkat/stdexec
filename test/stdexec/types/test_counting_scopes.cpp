@@ -25,8 +25,11 @@
 import std;
 #else
 #  include <atomic>
+#  include <chrono>
 #  include <concepts>
+#  include <latch>
 #  include <optional>
+#  include <thread>
 #  include <type_traits>
 #endif
 
@@ -282,6 +285,56 @@ namespace
     ex::sync_wait(outerScope.join());
 
     REQUIRE(!failed);
+  }
+#endif
+
+#if !STDEXEC_NO_STDCPP_COROUTINES()
+  SCOPE_TEST_CASE("a task can await a join-sender while work is outstanding on another thread")
+  {
+    exec::static_thread_pool pool{1};
+    TestType                 scope;
+    std::latch               started{1};
+    std::latch               release{1};
+    std::atomic<bool>        finished{false};
+
+    ex::spawn(ex::starts_on(pool.get_scheduler(),
+                            ex::just()
+                              | ex::then(
+                                [&]() noexcept
+                                {
+                                  started.count_down();
+                                  release.wait();
+                                  finished = true;
+                                })),
+              scope.get_token());
+    started.wait();
+
+    std::jthread releaser{[&]
+                          {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                            release.count_down();
+                          }};
+
+    bool joined = false;
+    auto body   = [&]() -> ex::task<void>
+    {
+      // the join-sender completes from the thread that ends the last associated
+      // operation, so the let_value sender must not be awaited as though it
+      // completes inline
+      co_await ex::let_value(ex::just(),
+                             [&]() noexcept
+                             {
+                               return ex::write_env(scope.join(),
+                                                    ex::prop{ex::get_start_scheduler,
+                                                             ex::inline_scheduler{}});
+                             });
+      joined = true;
+    };
+
+    auto result = ex::sync_wait(body());
+    REQUIRE(result.has_value());
+    REQUIRE(joined);
+    REQUIRE(finished);
   }
 #endif
 
