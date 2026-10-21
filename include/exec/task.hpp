@@ -17,6 +17,8 @@
 
 #include <any>
 #include <cassert>
+#include <concepts>
+#include <cstddef>
 #include <exception>
 #include <utility>
 
@@ -357,6 +359,31 @@ namespace experimental::execution
       __variant<__void, std::exception_ptr> __data_{__no_init};
     };
 
+    ////////////////////////////////////////////////////////////////////////////
+    // A context that declares allocate_frame/deallocate_frame chooses where its
+    // tasks' coroutine frames live; otherwise the global operator new does.
+    template <class _Context>
+    struct __frame_allocation
+    {};
+
+    template <class _Context>
+      requires requires(std::size_t __size, void* __frame) {
+        { _Context::allocate_frame(__size) } -> std::same_as<void*>;
+        { _Context::deallocate_frame(__frame, __size) } noexcept;
+      }
+    struct __frame_allocation<_Context>
+    {
+      static auto operator new(std::size_t __size) -> void*
+      {
+        return _Context::allocate_frame(__size);
+      }
+
+      static void operator delete(void* __frame, std::size_t __size) noexcept
+      {
+        _Context::deallocate_frame(__frame, __size);
+      }
+    };
+
     template <class _Sch>
     struct __just_void
     {
@@ -564,6 +591,7 @@ namespace experimental::execution
       struct __promise
         : __promise_base<_Ty>
         , with_awaitable_senders<__promise>
+        , __frame_allocation<_Context>
       {
         constexpr auto get_return_object() noexcept -> basic_task
         {
